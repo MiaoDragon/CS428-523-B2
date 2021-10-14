@@ -3,6 +3,9 @@ using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
 
+
+
+
 public class PrismManager : MonoBehaviour
 {
     public int prismCount = 10;
@@ -107,8 +110,24 @@ public class PrismManager : MonoBehaviour
 
     #region Incomplete Functions
 
+
+    private class BoundingBoxAxis
+    {
+        public float value;
+        public int object_id;
+        public int type;
+        public BoundingBoxAxis(float val, int oid, int tp)
+        {
+            value = val;
+            object_id = oid;
+            type = tp;
+        }        
+    }
+
     private IEnumerable<PrismCollision> PotentialCollisions()
     {
+        /*
+         * default implementation
         for (int i = 0; i < prisms.Count; i++) {
             for (int j = i + 1; j < prisms.Count; j++) {
                 var checkPrisms = new PrismCollision();
@@ -119,6 +138,105 @@ public class PrismManager : MonoBehaviour
             }
         }
 
+        yield break;
+        */
+
+        // * implementation using sort & sweep
+        // for each prism shape, obtain the bounding box
+        // by checking each point, and obtain the min and max
+        // in each dimension
+        bool[] potentialObjects = new bool[prisms.Count];
+        // counting how many times the pair appeared
+        int[] potentialPairHashes = new int[prisms.Count * prisms.Count];
+        // hashing function: big_idx*N + small_idx
+
+        // initialize the potential object list with all the objects in the scene
+        for (int i = 0; i < prisms.Count; i++) potentialObjects[i] = true;
+        for (int i = 0; i < prisms.Count * prisms.Count; i++) potentialPairHashes[i] = 0;
+        for (int dim=0; dim<3; dim++)
+        {
+            // skip the second dimension if the object is 2D
+            if (maxPrismScaleY==0 && dim==1)
+            {
+                // one of the dimension is 0. Add count 1 to each of the potential pair
+                for (int i = 0; i < prisms.Count * prisms.Count; i++) potentialPairHashes[i] += 1;
+                continue;
+            }
+            List<BoundingBoxAxis> v_list = new List<BoundingBoxAxis>(prisms.Count);
+            // value, obj_idx, {0,1} indicating start/end
+            for (int i = 0; i < prisms.Count; i++)
+            {
+                if (!potentialObjects[i]) continue;
+                float v_min = Mathf.Max(prismRegionRadiusXZ+maxPrismScaleXZ*2, prismRegionRadiusY+maxPrismScaleY*2);
+                float v_max = -v_min;
+                for (int j = 0; j < prisms[i].pointCount; j++)
+                {
+                    if (prisms[i].points[j][dim] < v_min)
+                    {
+                        v_min = prisms[i].points[j][dim];
+                    }
+                    if (prisms[i].points[j][dim] > v_max)
+                    {
+                        v_max = prisms[i].points[j][dim];
+                    }
+                }
+                // add corresponding axis to the array
+                v_list.Add(new BoundingBoxAxis(v_min, i, 0));
+                v_list.Add(new BoundingBoxAxis(v_max, i, 1));
+            }
+            // sort the list by the x/y/z values
+
+            v_list.Sort((p1, p2) => p1.value.CompareTo(p2.value));
+
+            List<int> activeObjects = new List<int>(v_list.Count());
+
+            // sweep to obtain the pair
+            // reset potential objects
+            for (int i=0; i < prisms.Count; i++) potentialObjects[i] = false;
+            for (int i=0; i<v_list.Count(); i++)
+            {
+                // if i-th element is the start, then check it with existing active objects
+                //      then add it to the active set
+                int oid = v_list[i].object_id;
+                int type = v_list[i].type;
+                if (type == 0) 
+                {
+                    for (int j = 0; j < activeObjects.Count(); j++)
+                    {
+                        // the two objects are potential pairs, check if we encountered them
+                        // before for "dim" times. If not, then they're not potential pairs
+                        // use hashing to check if the pair appeared before
+                        int smaller = Mathf.Min(activeObjects[j], oid);
+                        int bigger = Mathf.Max(activeObjects[j], oid);
+
+                        // if the pair didn't appear enough times before, they'll be ruled out
+                        if (!(potentialPairHashes[bigger * prisms.Count + smaller] == dim)) continue;
+                        // potential pair will add one to count
+                        potentialPairHashes[bigger * prisms.Count + smaller] += 1;
+                        
+                        potentialObjects[activeObjects[j]] = true;
+                        potentialObjects[oid] = true;
+
+                        // yield the current pair if the pair has appeared for enough times (3 times for dim 3)
+                        if (potentialPairHashes[bigger * prisms.Count + smaller] == 3)
+                        {
+                            // yield the current pair
+                            var checkPrisms = new PrismCollision();
+                            checkPrisms.a = prisms[oid];
+                            checkPrisms.b = prisms[activeObjects[j]];
+                            //Debug.Log("collision pairs: object " + oid.ToString() + ", object " + activeObjects[j].ToString());
+                            yield return checkPrisms;
+                        }
+                    }
+                    activeObjects.Add(oid);
+                }
+                // if i-th element is the end, then remove it from the active object set
+                else
+                {
+                    activeObjects.Remove(oid);
+                }
+            }
+        }
         yield break;
     }
 
