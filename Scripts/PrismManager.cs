@@ -154,13 +154,18 @@ public class PrismManager : MonoBehaviour
         // counting how many times the pair appeared
         int[] potentialPairHashes = new int[prisms.Count * prisms.Count];
         // hashing function: big_idx*N + small_idx
-        for (int i=0; i < prisms.Count(); i++)
-        {
-            for (int j=0; j< prisms[i].points.Length; j++)
-            {
-                Debug.Log("object " + i.ToString() + ", point " + j.ToString() + ": " + prisms[i].points[j].ToString());
-                Debug.Log("object " + i.ToString() + ", midY " + j.ToString() + ": " + prisms[i].midY.ToString());
 
+        List<Vector3[]> prismPoints = new List<Vector3[]>();
+        for (int i=0; i< prisms.Count(); i++)
+        {
+            if (maxPrismScaleY != 0)
+            {
+                Vector3[] points = Obtain3DPoints(prisms[i]);
+                prismPoints.Add(points);
+            }
+            else
+            {
+                prismPoints.Add(prisms[i].points);
             }
         }
         // initialize the potential object list with all the objects in the scene
@@ -168,11 +173,11 @@ public class PrismManager : MonoBehaviour
         for (int i = 0; i < prisms.Count * prisms.Count; i++) potentialPairHashes[i] = 0;
         for (int dim=0; dim<3; dim++)
         {
-            Debug.Log("dim: " + dim.ToString());
+            //Debug.Log("dim: " + dim.ToString());
             // skip the second dimension if the object is 2D
             if (maxPrismScaleY==0 && dim==1)
             {
-                Debug.Log("skipping");
+                //Debug.Log("skipping");
 
                 // one of the dimension is 0. Add count 1 to each of the potential pair
                 for (int i = 0; i < prisms.Count * prisms.Count; i++) potentialPairHashes[i] += 1;
@@ -185,19 +190,19 @@ public class PrismManager : MonoBehaviour
                 if (!potentialObjects[i]) continue;
                 float v_min = Mathf.Max(prismRegionRadiusXZ+maxPrismScaleXZ*2, prismRegionRadiusY+maxPrismScaleY*2);
                 float v_max = -v_min;
-                for (int j = 0; j < prisms[i].pointCount; j++)
+                for (int j = 0; j < prismPoints[i].Length; j++)
                 {
-                    if (prisms[i].points[j][dim] < v_min)
+                    if (prismPoints[i][j][dim] < v_min)
                     {
-                        v_min = prisms[i].points[j][dim];
+                        v_min = prismPoints[i][j][dim];
                     }
-                    if (prisms[i].points[j][dim] > v_max)
+                    if (prismPoints[i][j][dim] > v_max)
                     {
-                        v_max = prisms[i].points[j][dim];
+                        v_max = prismPoints[i][j][dim];
                     }
                 }
-                Debug.Log("object " + i.ToString() + " vmin: " + v_min.ToString());
-                Debug.Log("object " + i.ToString() + " vmax: " + v_max.ToString());
+                //Debug.Log("object " + i.ToString() + " vmin: " + v_min.ToString());
+                //Debug.Log("object " + i.ToString() + " vmax: " + v_max.ToString());
 
                 // add corresponding axis to the array
                 v_list.Add(new BoundingBoxAxis(v_min, i, 0));
@@ -207,11 +212,7 @@ public class PrismManager : MonoBehaviour
 
             v_list.Sort((p1, p2) => p1.value.CompareTo(p2.value));
 
-            Debug.Log("after sorting...");
-            for (int i=0; i<v_list.Count(); i++)
-            {
-                Debug.Log(v_list[i].object_id.ToString() + ", type: " + v_list[i].type.ToString());
-            }
+            //Debug.Log("after sorting...");
 
             List<int> activeObjects = new List<int>(v_list.Count());
 
@@ -266,17 +267,17 @@ public class PrismManager : MonoBehaviour
     }
 
 
-    private Vector3[] MinkowskiDiff(Prism prismA, Prism prismB)
+    private Vector3[] MinkowskiDiff(Vector3[] pointsA, Vector3[] pointsB)
     {
         // obtain the MinkowskiDiff of two convex shapes
         // since SupportPoint will always return the point no the edge of the convex shape, we can 
         // just return the point set after MinkowskiDiff
-        Vector3[] points = new Vector3[prismA.points.Length*prismB.points.Length];
-        for (int i = 0; i < prismA.points.Length; i++)
+        Vector3[] points = new Vector3[pointsA.Length*pointsB.Length];
+        for (int i = 0; i < pointsA.Length; i++)
         {
-            for (int j = 0; j < prismB.points.Length; j++)
+            for (int j = 0; j < pointsB.Length; j++)
             {
-                points[i * prismB.points.Length + j] = prismA.points[i] - prismB.points[j];
+                points[i * pointsB.Length + j] = pointsA[i] - pointsB[j];
             }
         }
 
@@ -546,11 +547,12 @@ public class PrismManager : MonoBehaviour
             int supportIdx = GetSupportPointIdx(v_new, points, origin);
 
             // put the new point to W
+            //Debug.Log("v_new: " + v_new.ToString());
             W.Add(points[supportIdx]);
 
             // check if the origin is in the convex hull of W
             // check by seeing if the point lies inside the line for each of the line
-            if (W.Count() < 3 && Vector3.Distance(ClosestPointToSimplex(W, origin), origin) == 0.0f)
+            if (W.Count() < 3 && Vector3.Distance(ClosestPointToSimplex(W, origin), origin) <= 1e-8f)
             {
                 // edge case: when the origin is on the edge
                 inCollision = true;
@@ -596,7 +598,7 @@ public class PrismManager : MonoBehaviour
         // can support all the points on one side
         for (int i=0; i<points.Length; i++)
         {
-            if (Vector3.Distance(points[i], origin) <= 1e-8f)
+            if (Vector3.Distance(points[i], origin) <= 1e-7f)
             {
                 continue;
                 // close to zero
@@ -610,11 +612,11 @@ public class PrismManager : MonoBehaviour
             bool supported = true;
             for (int j=0; j<points.Length; j++)
             {
-                if (Vector3.Dot(points[j] - origin, normal) > 1e-8f)
+                if (Vector3.Dot(points[j] - origin, normal) > 1e-7f)
                 {
                     numPositive += 1;
                 }
-                else if (Vector3.Dot(points[j] - origin, normal) > -1e-8f)
+                else if (Vector3.Dot(points[j] - origin, normal) > -1e-7f)
                 {
                     numEqual += 1;
                 }
@@ -643,7 +645,7 @@ public class PrismManager : MonoBehaviour
 
         collision.penetrationDepthVectorAB = Vector3.zero;
 
-        Vector3[] points = MinkowskiDiff(prismA, prismB);
+        Vector3[] points = MinkowskiDiff(prismA.points, prismB.points);
 
         // boundary check if the origin lies on the boundary of the minkowskiDiff
         if (boundaryCheck2D(points, Vector3.zero))
@@ -668,6 +670,19 @@ public class PrismManager : MonoBehaviour
 
     }
 
+    private Vector3[] Obtain3DPoints(Prism prism)
+    {
+        // obtain the 3D points (top and bottom) from prism
+        var yMin = prism.midY - prism.height / 2 * prism.prismObject.transform.localScale.y;
+        var yMax = prism.midY + prism.height / 2 * prism.prismObject.transform.localScale.y;
+        Vector3[] points = new Vector3[prism.points.Length * 2];
+        for (int i=0; i < prism.points.Length; i++)
+        {
+            points[2*i] = prism.points[i] + Vector3.up * yMin;
+            points[2 * i + 1] = prism.points[i] + Vector3.up * yMax;
+        }
+        return points;
+    }
     private bool CheckCollision3D(PrismCollision collision)
     {
         // For 3D, we firstly check if the minkowski points in the z axis contain origin
@@ -679,8 +694,11 @@ public class PrismManager : MonoBehaviour
 
         collision.penetrationDepthVectorAB = Vector3.zero;
 
+        // obtain pointsA and pointsB from the prism
+        Vector3[] pointsA = Obtain3DPoints(prismA);
+        Vector3[] pointsB = Obtain3DPoints(prismB);
 
-        Vector3[] points = MinkowskiDiff(prismA, prismB);
+        Vector3[] points = MinkowskiDiff(pointsA, pointsB);
 
         // pre-check: if the max_y >0 and min_y < 0
         float maxY = -1.0f;
@@ -702,8 +720,8 @@ public class PrismManager : MonoBehaviour
                 maxYCount += 1;
             }
         }
-        Debug.Log("maxY: " + maxY.ToString());
-        Debug.Log("minY: " + minY.ToString());
+        //Debug.Log("maxY: " + maxY.ToString());
+        //Debug.Log("minY: " + minY.ToString());
 
         if (maxY < 0 || minY > 0)
         {
